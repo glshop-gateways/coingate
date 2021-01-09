@@ -1,12 +1,11 @@
 <?php
 /**
- * Gateway implementation for Paylike (https://paylike.io)
+ * Gateway implementation for CoinGate (https://developer.coingate.com)
  *
  * @author      Lee Garner <lee@leegarner.com>
- * @copyright   Copyright (c) 2018-2020 Lee Garner <lee@leegarner.com>
+ * @copyright   Copyright (c) 2020 Lee Garner <lee@leegarner.com>
  * @package     shop
- * @version     v1.2.0
- * @since       v0.7.0
+ * @version     v0.0.1
  * @license     http://opensource.org/licenses/gpl-2.0.php
  *              GNU Public License v2 or later
  * @filesource
@@ -14,15 +13,33 @@
 namespace Shop\Gateways\coingate;
 use Shop\Currency;
 use Shop\Config;
+use Shop\Customer;
+use Shop\Models\OrderState;
 use LGLib\NameParser;
 
 
 /**
- * Class for Square payment gateway.
+ * Class for CoinGate crypto currency processing gateway.
  * @package shop
  */
-class coingate extends \Shop\Gateway
+class Gateway extends \Shop\Gateway
 {
+    /** Gateway version.
+     * @const string */
+    protected const VERSION = '0.0.1';
+
+    /** Gateway ID.
+     * @var string */
+    protected $gw_name = 'coingate';
+
+    /** Gateway provide. Company name, etc.
+     * @var string */
+    protected $gw_provider = 'CoinGate';
+
+    /** Gateway service description.
+     * @var string */
+    protected $gw_desc = 'CoinGate Crypto Currency';
+
     /** Internal API client to facilitate reuse.
      * @var object */
     private $_api_client = NULL;
@@ -40,12 +57,7 @@ class coingate extends \Shop\Gateway
             'USD', 'EUR',
         );
 
-        // These are used by the parent constructor, set them first.
-        $this->gw_name = 'coingate';
-        $this->gw_desc = 'CoinGate Crypto Currency';
-
-        // Set default values for the config items, just to be sure that
-        // something is set here.
+        // Set up the config field definitions.
         $this->cfgFields = array(
             'prod' => array(
                 'auth_token'   => 'password',
@@ -56,9 +68,10 @@ class coingate extends \Shop\Gateway
             'global' => array(
                 'test_mode' => 'checkbox',
                 'rcv_currency' => 'select',
+                'callback_token' => 'TEMPTOKENHERE',
             ),
         );
-        // Set defaults
+        // Set config defaults
         $this->config = array(
             'global' => array(
                 'test_mode'     => '1',
@@ -77,6 +90,18 @@ class coingate extends \Shop\Gateway
         if (!in_array($this->currency_code, $supported_currency)) {
             $this->enabled = 0;
         }
+    }
+
+
+    /**
+     * Make the API classes available. May be needed for reports.
+     *
+     * @return  object  $this
+     */
+    public function loadSDK()
+    {
+        require_once __DIR__ . '/vendor/autoload.php';
+        return $this;
     }
 
 
@@ -114,78 +139,46 @@ class coingate extends \Shop\Gateway
 
 
     /**
-     * Check if the gateway supports invoicing. Default is false.
+     * Create an order at Coingate.
      *
-     * @return  boolean True if invoicing is supported, False if not.
+     * @see     self::creatInvoice()
+     * @see     self::confirmOrder()
+     * @param   object  $Order  Order object
+     * @return  object      Coingate order object
      */
-    public function supportsInvoicing()
+    private function _createOrder($Order)
     {
-        return false;
+        global $LANG_SHOP;
+
+        $cust_info = $this->getCustomer($Order);
+        if ($cust_info === false ) {
+            SHOP_log("Error retrieving customer for order " . $Order->getOrderId());
+            return false;
+        }
+
+        $params = array(
+            'order_id' => $Order->getOrderId(),
+            'title' => $LANG_SHOP['order'] . ' ' . $Order->getOrderId(),
+            'price_amount' => $Order->getBalanceDue(),
+            'price_currency' => $Order->getCurrency()->getCode(),
+            'receive_currency' => $this->getConfig('rcv_currency'),
+            'callback_url' => $this->getWebhookUrl(),
+            'cancel_url' => $Order->cancelUrl(),
+            'success_url' => SHOP_URL . '/index.php?thanks',
+            'token' => $Order->getToken(),
+        );
+        $this->_getApiClient();
+        $gwOrder = \CoinGate\Merchant\Order::create($params);
+        return $gwOrder;
     }
 
 
     /**
-     * Create and send an invoice for an order.
+     * Create a new customer at Coingate.
      *
-     * @param   string  $order_num  Order Number
-     * @return  boolean     True on success, False on error
+     * @param   object  $Order  Order object
+     * @return  array|false     Array of subcriber details, false on error
      */
-    public function createInvoice($order_num, $terms_gw)
-    {
-        global $_CONF, $LANG_SHOP;
-
-        $access_token = $this->getBearerToken();
-        if (!$access_token) {
-            SHOP_log("Could not get Paypal access token", SHOP_LOG_ERROR);
-            return false;
-        }
-
-        $Shop = new Company();
-        $Order = Order::getInstance($order_num);
-        $Currency = $Order->getCurrency();
-        $Billto = $Order->getBillto();
-        $Shipto = $Order->getShipto();
-        $Order->updateStatus(OrderState::INVOICED);
-
-        $A = array(
-            'detail' => array(
-                'invoice_number' => $Order->getInvoiceNumber(),
-                'reference' => $order_num,
-                'currency_code' => $Currency->getCode(),
-                'payment_term' => array(
-                    'term_type' => $this->getInvoiceTerms($terms_gw->getConfig('net_days')),
-                ),
-            ),
-            'invoicer' => array(
-                'name' => array(
-                    'business_name' => $Shop->getCompany(),
-                ),
-                'address' => array(
-                    'address_line_1' => $Shop->getAddress1(),
-                    'address_line_2' => $Shop->getAddress2(),
-                    'admin_area_2' => $Shop->getCity(),
-                    'admin_area_1' => $Shop->getState(),
-                    'postal_code' => $Shop->getPostal(),
-                    'country_code' => $Shop->getCountry(),
-                ),
-                'website' => $_CONF['site_url'],
-            ),
-            'primary_recipients' => array(
-                array(
-                    'billing_info' => array(
-                        'name' => array(),
-                    ),
-                ),
-            ),
-        );
-    }
-
-    public function _testCust($Order)
-    {
-        return $this->createCustomer($Order);
-    }
-
-
     private function createCustomer($Order)
     {
         $cust_id = $Order->getUid();
@@ -200,6 +193,7 @@ class coingate extends \Shop\Gateway
             'subscriber_id' => $Order->getUid(),
             'first_name' => NameParser::F($Customer->getName()),
             'last_name' => NameParser::L($Customer->getName()),
+            'organization_name' => $Customer->getCompany(),
             'address' => $Customer->getAddress1(),
             'secondary_address' => $Customer->getAddress2(),
             'city' => $Customer->getCity(),
@@ -212,54 +206,44 @@ class coingate extends \Shop\Gateway
             'POST',
             $params
         );
-        var_dump($result);die;
+        if (
+            is_array($result) &&
+            $result['subscriber_id'] &&
+            $result['subscriber_id'] == $cust_id
+        ) {
+            // Save the coingate custermer ID in the reference table
+            $Customer->setGatewayId($this->gw_name, $result['subscriber_id']);
+            return $result;
+        } else {
+            return false;
+        }
     }
 
-    public function _getCust($Order)
-    {
-        return $this->getCustomer($Order);
-    }
 
     /**
-     * Retrieve an existing customer record from Square by reference ID.
+     * Retrieve an existing subscriber from Coingate by CG reference ID
      * Calls createCustomer() to create a new customer record if not found.
      *
      * @param   object  $Order      Order object
-     * @return  object|false    Customer object, or false on error.
+     * @return  array       Customer info array, or false on error.
      */
     private function getCustomer($Order)
     {
         $cust_id = $Order->getUid();
+        $Customer = Customer::getInstance($cust_id);
+        $gw_id = $Customer->getGatewayId($this->gw_name);
         $this->_getApiClient();
-        $cust = \CoinGate\CoinGate::request('/billing/subscribers/219', 'GET');
-        var_dump($cust);die;
-
-
-        $body = new \Square\Models\SearchCustomersRequest;
-        $body->setLimit(1);
-        $body->setQuery(new \Square\Models\CustomerQuery);
-        $body->getQuery()->setFilter(new \Square\Models\CustomerFilter);
-        $body->getQuery()->getFilter()->setCreationSource(new \Square\Models\CustomerCreationSourceFilter);
-        $body->getQuery()->getFilter()->getCreationSource()->setValues([\Square\Models\CustomerCreationSource::THIRD_PARTY]);
-        $body->getQuery()->getFilter()->getCreationSource()->setRule(\Square\Models\CustomerInclusionExclusion::INCLUDE_);
-        $body->getQuery()->getFilter()->setReferenceId(new \Square\Models\CustomerTextFilter);
-        $body->getQuery()->getFilter()->getReferenceId()->setExact($cust_id);
-        $body->getQuery()->setSort(new \Square\Models\CustomerSort);
-        $body->getQuery()->getSort()->setField(\Square\Models\CustomerSortField::CREATED_AT);
-        $body->getQuery()->getSort()->setOrder(\Square\Models\SortOrder::ASC);
-
-        $customersApi = $this->_getApiClient()->getCustomersApi();
-        $apiResponse = $customersApi->searchCustomers($body);
-        if ($apiResponse->isSuccess()) {
-            $searchCustomersResponse = $apiResponse->getResult();
-            if (empty($searchCustomersResponse->getCustomers())) {
-                return $this->createCustomer($Order);
-            } else {
-                return $searchCustomersResponse->getCustomers()[0];
-            }
+        if ($gw_id) {
+            $cust_info = \CoinGate\CoinGate::request('/billing/subscribers/' . $gw_id, 'GET');
+        }
+        if (
+            is_array($cust_info) &&
+            isset($cust_info['subscriber_id']) &&
+            $cust_info['subscriber_id'] == $cust_id
+        ) {
+            return $cust_info;
         } else {
-            $this->_errors = $apiResponse->getErrors();
-            return false;
+            return $this->createCustomer($Order);
         }
     }
 
@@ -308,29 +292,6 @@ class coingate extends \Shop\Gateway
 
 
     /**
-     * Get the command value and template name for the requested button type.
-     *
-     * @param   string  $btn_type   Type of button being created
-     * @return  array       Array ('cmd'=>command, 'tpl'=>template name
-     */
-    private function gwButtonType($btn_type='')
-    {
-        switch ($btn_type) {
-        case 'donation':
-            $cmd = '_donations';
-            $tpl = 'donation';
-            break;
-        case 'buy_now':
-        default:
-            $cmd = '_xclick';
-            $tpl = 'buy_now';
-            break;
-        }
-        return array('cmd' => $cmd, 'tpl' => $tpl);
-    }
-
-
-    /**
      * Get the values to show in the "Thank You" message when a customer
      * returns to our site.
      *
@@ -362,20 +323,6 @@ class coingate extends \Shop\Gateway
 
 
     /**
-     * Get the logo files for light and dark themes.
-     *
-     * @return  array   Array of image file paths
-     */
-    protected function XgetLogoFiles()
-    {
-        return array(
-            'dark' => __DIR__ . '/coingate/images/logo_dark.png',
-            'light'  => __DIR__ . '/coingate/images/logo_light.png',
-        );
-    }
-
-
-    /**
      * Get the form method to use with the final checkout button.
      * Use GET to work with confirm.php.
      *
@@ -394,43 +341,16 @@ class coingate extends \Shop\Gateway
      */
     private function _getApiClient()
     {
-        require_once __DIR__ . '/vendor/autoload.php';
-        \CoinGate\CoinGate::config(array(
-            'environment'               => $this->getConfig('test_mode') ? 'sandbox' : 'live',
-            'auth_token'                => $this->getConfig('auth_token'),
-            'curlopt_ssl_verifypeer'    => false,    // default is false
-        ) );
-    }
-
-
-    /**
-     * Create an order with the payment provider.
-     *
-     * @param   object  $Cart   Cart object
-     * @return  object      Provider's order object
-     */
-    public function createGWorder($Cart)
-    {
-        global $LANG_SHOP;
-
-        $this->_getApiClient();
-        $Cur = $Cart->getCurrency();
-        $by_gc = $Cart->getGC();
-        $total_amount = $Cart->getTotal() - $Cart->getGC();
-        $params = array(
-            'order_id'          => $Cart->getOrderID(),
-            'price_amount'      => $Cart->getTotal() - $Cart->getGC(),
-            'price_currency'    => $Cart->getCurrency()->getCode(),
-            'receive_currency'  => $this->getConfig('rcv_currency'),
-            'callback_url'      => $this->getIpnUrl(),
-            'cancel_url'        => $Cart->cancelUrl(),
-            'success_url'       => Config::get('url') . '/index.php?thanks=' . $this->gw_name,
-            'title'             => $LANG_SHOP['order'] . ' ' . $Cart->getOrderId(),
-            'description'       => $LANG_SHOP['order'] . ' ' . $Cart->getOrderId(),
-            'token'             => $Cart->getToken(),
-        );
-        $order = \CoinGate\Merchant\Order::create($params);
-        return $order;
+        static $done = false;
+        if (!$done) {
+            $this->loadSDK();
+            \CoinGate\CoinGate::config(array(
+                'environment'               => $this->getConfig('test_mode') ? 'sandbox' : 'live',
+                'auth_token'                => $this->getConfig('auth_token'),
+                'curlopt_ssl_verifypeer'    => false,    // default is false
+            ) );
+            $done = true;
+        }
     }
 
 
@@ -471,17 +391,33 @@ class coingate extends \Shop\Gateway
      */
     public function confirmOrder($Order)
     {
+        global $LANG_SHOP;
+
         $redirect = '';
         if (!$Order->isNew()) {
-            $gwOrder = $this->createGWorder($Order);
+            $gwOrder = $this->_createOrder($Order);
             SHOP_log("order created: " . print_r($gwOrder,true), SHOP_LOG_DEBUG);
-            if (is_object($gwOrder)) {
+            if (
+                is_object($gwOrder) &&
+                $gwOrder->token == $Order->getToken()
+            ) {
                 $redirect = $gwOrder->payment_url;
             } else {
                 COM_setMsg("There was an error processing your order");
             }
         }
         return $redirect;
+    }
+
+
+    /**
+     * Check that a valid config has been set for the environment.
+     *
+     * @return  boolean     True if valid, False if not
+     */
+    public function hasValidConfig()
+    {
+        return !empty($this->getConfig('auth_token'));
     }
 
 }
