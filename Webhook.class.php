@@ -84,11 +84,11 @@ class Webhook extends \Shop\Webhook
      * notifies the buyer and administrator
      *
      * @uses    self::Verify()
-     * @uses    BaseIPN::isUniqueTxnId()
-     * @uses    BaseIPN::handlePurchase()
      */
     public function Dispatch()
     {
+        $retval = true;
+
         $LogID = $this->logIPN();
         switch ($this->getEvent()) {
         case 'pending':
@@ -99,7 +99,7 @@ class Webhook extends \Shop\Webhook
             SHOP_log("Received {$this->getPayment()} gross payment", SHOP_LOG_DEBUG);
             if ($this->Order->getBalanceDue() > $this->getPayment()) {
                 SHOP_log("Insufficient Funds Received from Coingate for order " . $this->Order->getOrderID());
-                return false;
+                return true;    // not an error requiring resent webhook
             }
             $Pmt = Payment::getByReference($this->getID());
             if ($Pmt->getPmtID() == 0) {
@@ -111,7 +111,7 @@ class Webhook extends \Shop\Webhook
                     ->setOrderID($this->getOrderID())
                     ->Save();
             }
-            $return = $this->handlePurchase($this->Order);
+            $retval = $this->handlePurchase();
             break;
         case 'invalid':
         case 'expired':
@@ -122,12 +122,9 @@ class Webhook extends \Shop\Webhook
             $this->Order->setStatus(OrderState::CANCELED)->Save(false);
             break;
         default:
-            return false;
             break;
         }
         return true;
     }
-
-
 
 }
