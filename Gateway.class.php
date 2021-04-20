@@ -26,7 +26,7 @@ class Gateway extends \Shop\Gateway
 {
     /** Gateway version.
      * @const string */
-    public const VERSION = '0.0.1';
+    public const VERSION = '0.1.0';
 
     /** Gateway ID.
      * @var string */
