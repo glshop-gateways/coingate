@@ -16,6 +16,7 @@ use Shop\Config;
 use Shop\Order;
 use Shop\Payment;
 use Shop\Models\OrderState;
+use Shop\Log;
 
 
 /**
@@ -63,7 +64,7 @@ class Webhook extends \Shop\Webhook
         $this->Order = Order::getInstance($this->getOrderId());
         $token = SHOP_getVar($this->getData(), 'token');
         if ($token != $this->Order->getToken()) {
-            SHOP_log(
+            Log::write('shop_system', Log::ERROR,
                 "Coingate Webhook, token $token does not match token of order " .
                 $this->Order->getOrderId()
             );
@@ -71,7 +72,7 @@ class Webhook extends \Shop\Webhook
         }
         $gworder = $this->GW->findOrder($gw_orderid);
         if (!$gworder || $gworder->status != $this->getEvent()) {
-            SHOP_log("Coingate order status does not match webhook status");
+            Log::write('shop_system', Log::ERROR, "Coingate order status does not match webhook status");
             return false;
         }
         return true;
@@ -96,19 +97,21 @@ class Webhook extends \Shop\Webhook
             break;
         case 'paid':
             $this->setPayment(SHOP_getVar($this->getData(), 'price_amount', 'float'));
-            SHOP_log("Received {$this->getPayment()} gross payment", SHOP_LOG_DEBUG);
+            Log::write('shop_system', Log::DEBUG, "Received {$this->getPayment()} gross payment");
             if ($this->Order->getBalanceDue() > $this->getPayment()) {
-                SHOP_log("Insufficient Funds Received from Coingate for order " . $this->Order->getOrderID());
+                Log::write('shop_system', Log::ERROR, "Insufficient Funds Received from Coingate for order " . $this->Order->getOrderID());
                 return true;    // not an error requiring resent webhook
             }
             $Pmt = Payment::getByReference($this->getID());
             if ($Pmt->getPmtID() == 0) {
                 $Pmt->setRefID($this->getID())
+                    ->setTxnId($this->getID())
                     ->setAmount($this->getPayment())
                     ->setGateway($this->getSource())
                     ->setMethod($this->getSource())
                     ->setComment('Webhook ' . $this->getID())
                     ->setOrderID($this->getOrderID())
+                    ->setStatus($this->getEvent())
                     ->Save();
             }
             $retval = $this->handlePurchase();
@@ -118,7 +121,6 @@ class Webhook extends \Shop\Webhook
         case 'canceled':
             // Order was marked invalid by the buyer or expired.
             // Set the status and return "false" to prevent further processing.
-            echo "Here";die;
             $this->Order->setStatus(OrderState::CANCELED)->Save(false);
             break;
         default:

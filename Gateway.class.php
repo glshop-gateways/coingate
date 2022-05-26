@@ -3,9 +3,9 @@
  * Gateway implementation for CoinGate (https://developer.coingate.com)
  *
  * @author      Lee Garner <lee@leegarner.com>
- * @copyright   Copyright (c) 2020 Lee Garner <lee@leegarner.com>
+ * @copyright   Copyright (c) 2020-2022 Lee Garner <lee@leegarner.com>
  * @package     shop
- * @version     v0.0.1
+ * @version     v0.0.2
  * @license     http://opensource.org/licenses/gpl-2.0.php
  *              GNU Public License v2 or later
  * @filesource
@@ -15,7 +15,7 @@ use Shop\Currency;
 use Shop\Config;
 use Shop\Customer;
 use Shop\Models\OrderState;
-use LGLib\NameParser;
+use Shop\Log;
 
 
 /**
@@ -152,7 +152,7 @@ class Gateway extends \Shop\Gateway
 
         $cust_info = $this->getCustomer($Order);
         if ($cust_info === false ) {
-            SHOP_log("Error retrieving customer for order " . $Order->getOrderId());
+            Log::write('shop_system', Log::ERROR, "Error retrieving customer for order " . $Order->getOrderId());
             return false;
         }
 
@@ -182,23 +182,24 @@ class Gateway extends \Shop\Gateway
     private function createCustomer($Order)
     {
         $cust_id = $Order->getUid();
-        $Customer = $Order->getBillto();
+        $Address = $Order->getBillto();
         if (empty($Order->getBuyerEmail())) {
             $email = DB_getItem($_TABLES['users'], 'email', "uid = {$Order->getUid()}");
             $Order->setBuyerEmail($email);
         }
         $this->_getApiClient();
+        $name_parts = $Customer::parseName($Address->getName());
         $params = array(
             'email' => $Order->getBuyerEmail(),
-            'subscriber_id' => $Order->getUid(),
-            'first_name' => NameParser::F($Customer->getName()),
-            'last_name' => NameParser::L($Customer->getName()),
-            'organization_name' => $Customer->getCompany(),
-            'address' => $Customer->getAddress1(),
-            'secondary_address' => $Customer->getAddress2(),
-            'city' => $Customer->getCity(),
-            'postal_code' => $Customer->getPostal(),
-            'country' => $Customer->getCountry(),
+            'subscriber_id' => $cust_id,
+            'first_name' => $name_parts['fname'],
+            'last_name' => $name_parts['lname'],
+            'organization_name' => $Address->getCompany(),
+            'address' => $Address->getAddress1(),
+            'secondary_address' => $Address->getAddress2(),
+            'city' => $Address->getCity(),
+            'postal_code' => $Address->getPostal(),
+            'country' => $Address->getCountry(),
         );
         $this->_getApiClient();
         $result = \CoinGate\CoinGate::request(
@@ -212,6 +213,7 @@ class Gateway extends \Shop\Gateway
             $result['subscriber_id'] == $cust_id
         ) {
             // Save the coingate custermer ID in the reference table
+            $Customer = new Customer($cust_id);
             $Customer->setGatewayId($this->gw_name, $result['subscriber_id']);
             return $result;
         } else {
@@ -234,7 +236,12 @@ class Gateway extends \Shop\Gateway
         $gw_id = $Customer->getGatewayId($this->gw_name);
         $this->_getApiClient();
         if ($gw_id) {
-            $cust_info = \CoinGate\CoinGate::request('/billing/subscribers/' . $gw_id, 'GET');
+            try {
+                $cust_info = \CoinGate\CoinGate::request('/billing/subscribers/' . $gw_id, 'GET');
+            } catch (\Exception $e) {
+                Log::write('shop_system', Log::DEBUG, __METHOD__ . ': ' . $e->getMessage());
+                $cust_info = NULL;
+            }
         }
         if (
             is_array($cust_info) &&
@@ -375,8 +382,8 @@ class Gateway extends \Shop\Gateway
             if (!$order) {
                 $order = NULL;
             }
-        } catch (Exception $e) {
-            SHOP_log(__CLASS__.'::'.__FUNCTION__. $e->getMessage());
+        } catch (\Exception $e) {
+            Log::write('shop_system', Log::ERROR, $e->getMessage());
             $order = NULL;
         }
         return $order;
@@ -396,7 +403,7 @@ class Gateway extends \Shop\Gateway
         $redirect = '';
         if (!$Order->isNew()) {
             $gwOrder = $this->_createOrder($Order);
-            SHOP_log("order created: " . print_r($gwOrder,true), SHOP_LOG_DEBUG);
+            Log::write('shop_system', Log::DEBUG, "order created: " . print_r($gwOrder,true));
             if (
                 is_object($gwOrder) &&
                 $gwOrder->token == $Order->getToken()
