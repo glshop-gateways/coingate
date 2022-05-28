@@ -68,7 +68,6 @@ class Gateway extends \Shop\Gateway
             'global' => array(
                 'test_mode' => 'checkbox',
                 'rcv_currency' => 'select',
-                'callback_token' => 'TEMPTOKENHERE',
             ),
         );
         // Set config defaults
@@ -188,7 +187,7 @@ class Gateway extends \Shop\Gateway
             $Order->setBuyerEmail($email);
         }
         $this->_getApiClient();
-        $name_parts = $Customer::parseName($Address->getName());
+        $name_parts = Customer::parseName($Address->getName());
         $params = array(
             'email' => $Order->getBuyerEmail(),
             'subscriber_id' => $cust_id,

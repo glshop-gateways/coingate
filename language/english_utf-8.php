@@ -12,6 +12,7 @@
  */
 
 $LANG_SHOP_gateway = array(
-'hlp_auth_token' => 'The auth token assigned by Coingate to your app. You will not be able to view this token from the Coingate UI',
+    'hlp_auth_token' => 'The auth token assigned by Coingate to your app. You will not be able to view this token from the Coingate UI',
+    'hlp_rcv_currency' => 'The cryptocurrency you wish to receive as payment.',
 );
 ?>
