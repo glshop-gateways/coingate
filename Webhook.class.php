@@ -56,7 +56,8 @@ class Webhook extends \Shop\Webhook
         $gw_orderid = SHOP_getVar($this->getData(), 'id');
         $this->setEvent(SHOP_getVar($this->getData(), 'status'));
         $this->setOrderID(SHOP_getVar($this->getData(), 'order_id'));
-        $this->setID('cg_' . $this->getEvent() . '_' . $gw_orderid);
+        $this->setID($gw_orderid);
+        $this->setRefID($gw_orderid);
         if (!$this->isUniqueTxnId()) {
             return false;
         }
@@ -105,7 +106,7 @@ class Webhook extends \Shop\Webhook
             $Pmt = Payment::getByReference($this->getID());
             if ($Pmt->getPmtID() == 0) {
                 $Pmt->setRefID($this->getID())
-                    ->setTxnId($this->getID())
+                    ->setTxnId($LogID)
                     ->setAmount($this->getPayment())
                     ->setGateway($this->getSource())
                     ->setMethod($this->getSource())
