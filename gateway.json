@@ -1,5 +1,5 @@
 {
-    "name": "coingate",
+	"name": "coingate",
 	"repo": {
 		"type": "github",
 		"project_id": "coingate"
