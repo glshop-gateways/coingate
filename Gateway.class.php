@@ -14,7 +14,6 @@ namespace Shop\Gateways\coingate;
 use Shop\Currency;
 use Shop\Config;
 use Shop\Customer;
-use Shop\Models\OrderState;
 use Shop\Log;
 
 
@@ -24,10 +23,6 @@ use Shop\Log;
  */
 class Gateway extends \Shop\Gateway
 {
-    /** Gateway version.
-     * @var string */
-    protected $VERSION = '0.1.0';
-
     /** Gateway ID.
      * @var string */
     protected $gw_name = 'coingate';

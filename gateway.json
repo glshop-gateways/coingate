@@ -1,7 +1,8 @@
 {
-	"name": "coingate",
-	"repo": {
-		"type": "github",
-		"project_id": "coingate"
-	}
+  "name": "coingate",
+  "version": "0.1.0",
+  "repo": {
+    "type": "github",
+    "project_id": "coingate"
+  }
 }
