@@ -15,7 +15,7 @@ namespace Shop\Gateways\coingate;
 use Shop\Config;
 use Shop\Order;
 use Shop\Payment;
-use Shop\Models\OrderState;
+use Shop\Models\OrderStatus;
 use Shop\Log;
 
 
@@ -94,7 +94,7 @@ class Webhook extends \Shop\Webhook
         $LogID = $this->logIPN();
         switch ($this->getEvent()) {
         case 'pending':
-            $this->Order->setStatus(OrderState::PENDING)->Save(false);
+            $this->Order->setStatus(OrderStatus::PENDING)->Save(false);
             break;
         case 'paid':
             $this->setPayment(SHOP_getVar($this->getData(), 'price_amount', 'float'));
@@ -121,7 +121,7 @@ class Webhook extends \Shop\Webhook
         case 'canceled':
             // Order was marked invalid by the buyer or expired.
             // Set the status and return "false" to prevent further processing.
-            $this->Order->setStatus(OrderState::CANCELED)->Save(false);
+            $this->Order->setStatus(OrderStatus::CANCELED)->Save(false);
             break;
         default:
             break;
